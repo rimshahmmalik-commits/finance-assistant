@@ -1,7 +1,17 @@
 import streamlit as st
 import pandas as pd
 
-from database.database import add_invoice, get_invoices
+from database.database import (
+    add_invoice,
+    get_invoices,
+    add_review_decision,
+    get_review_decisions,
+    get_review_decision_for_invoice,
+    update_invoice_status,
+    invoice_exists,
+)
+
+from ai.finance_ai import review_invoice_with_ai
 
 
 # --------------------------------------------------
@@ -31,11 +41,6 @@ def clean_text(value):
 
 
 def calculate_amount_statistics(df, amount_column):
-    """
-    Calculate typical invoice values so we can flag
-    unusually large amounts.
-    """
-
     numeric_amounts = pd.to_numeric(
         df[amount_column],
         errors="coerce"
@@ -49,19 +54,12 @@ def calculate_amount_statistics(df, amount_column):
         return None, None
 
     median_amount = positive_amounts.median()
-
-    # Simple anomaly threshold for V2.
-    # Later this can become client-specific / AI-driven.
     unusual_threshold = median_amount * 5
 
     return median_amount, unusual_threshold
 
 
 def calculate_risk(problems, warnings):
-    """
-    Convert detected issues into a simple risk score.
-    """
-
     score = 0
 
     serious_problems = {
@@ -77,7 +75,6 @@ def calculate_risk(problems, warnings):
         score += serious_problems.get(problem, 30)
 
     score += len(warnings) * 20
-
     score = min(score, 100)
 
     if score >= 60:
@@ -91,9 +88,6 @@ def calculate_risk(problems, warnings):
 
 
 def generate_recommendation(problems, warnings):
-    """
-    Explain what the finance user should do next.
-    """
 
     if "Invoice already exists in database" in problems:
         return "Do not import — verify whether this invoice was already processed."
@@ -124,9 +118,11 @@ def generate_recommendation(problems, warnings):
 # --------------------------------------------------
 
 def show_import_page():
+
     st.title("Smart Import")
+
     st.caption(
-        "Validate, risk-score and convert finance data into invoice drafts."
+        "Validate, risk-score and intelligently review finance data."
     )
 
     uploaded_file = st.file_uploader(
@@ -138,6 +134,8 @@ def show_import_page():
         st.info(
             "Upload an Excel or CSV file containing invoice data."
         )
+
+        show_audit_history()
         return
 
     # --------------------------------------------------
@@ -191,32 +189,17 @@ def show_import_page():
 
     suggested_invoice = find_suggested_column(
         columns,
-        [
-            "invoice_number",
-            "invoice",
-            "inv_no",
-            "bill_no"
-        ]
+        ["invoice_number", "invoice", "inv_no", "bill_no"]
     )
 
     suggested_client = find_suggested_column(
         columns,
-        [
-            "client",
-            "company",
-            "customer",
-            "business"
-        ]
+        ["client", "company", "customer", "business"]
     )
 
     suggested_amount = find_suggested_column(
         columns,
-        [
-            "amount",
-            "total",
-            "value",
-            "invoice_value"
-        ]
+        ["amount", "total", "value", "invoice_value"]
     )
 
     invoice_index = (
@@ -260,8 +243,6 @@ def show_import_page():
             index=amount_index
         )
 
-    # Prevent accidentally mapping one column to everything.
-
     if len({
         invoice_column,
         client_column,
@@ -298,7 +279,6 @@ def show_import_page():
     ready_rows = []
     review_rows = []
     blocked_rows = []
-
     all_analysis = []
 
     seen_numbers = set()
@@ -318,9 +298,7 @@ def show_import_page():
         problems = []
         warnings = []
 
-        # --------------------------
         # REQUIRED FIELDS
-        # --------------------------
 
         if not invoice_number:
             problems.append(
@@ -332,9 +310,7 @@ def show_import_page():
                 "Missing client"
             )
 
-        # --------------------------
-        # AMOUNT VALIDATION
-        # --------------------------
+        # AMOUNT
 
         try:
             amount = float(raw_amount)
@@ -352,9 +328,7 @@ def show_import_page():
 
         normalized_invoice = invoice_number.lower()
 
-        # --------------------------
-        # DUPLICATE DETECTION
-        # --------------------------
+        # DUPLICATES
 
         if (
             normalized_invoice
@@ -377,9 +351,7 @@ def show_import_page():
                 normalized_invoice
             )
 
-        # --------------------------
-        # ANOMALY DETECTION
-        # --------------------------
+        # ANOMALIES
 
         if (
             unusual_threshold is not None
@@ -389,9 +361,7 @@ def show_import_page():
                 "Amount is unusually high compared with this file"
             )
 
-        # --------------------------
-        # RISK ENGINE
-        # --------------------------
+        # RISK
 
         risk_score, risk_level = calculate_risk(
             problems,
@@ -432,7 +402,7 @@ def show_import_page():
             ready_rows.append(row_data)
 
     # --------------------------------------------------
-    # ANALYSIS SUMMARY
+    # METRICS
     # --------------------------------------------------
 
     metric1, metric2, metric3, metric4 = st.columns(4)
@@ -463,7 +433,7 @@ def show_import_page():
 
     if median_amount is not None:
         st.caption(
-            f"Typical invoice amount in this file: "
+            f"Typical invoice amount: "
             f"PKR {median_amount:,.2f}"
         )
 
@@ -471,13 +441,13 @@ def show_import_page():
     # REVIEW QUEUE
     # --------------------------------------------------
 
-    if review_rows or blocked_rows:
+    attention_rows = (
+        blocked_rows + review_rows
+    )
+
+    if attention_rows:
 
         st.subheader("Review Queue")
-
-        attention_rows = (
-            blocked_rows + review_rows
-        )
 
         st.dataframe(
             attention_rows,
@@ -485,35 +455,317 @@ def show_import_page():
             hide_index=True
         )
 
+        st.subheader("AI Finance Reviewer")
+
+        for row in attention_rows:
+
+            invoice_label = (
+                row["Invoice"]
+                if row["Invoice"]
+                else "Missing invoice"
+            )
+
+            client_label = (
+                row["Client"]
+                if row["Client"]
+                else "Unknown client"
+            )
+
+            with st.expander(
+                f"{invoice_label} — {client_label}"
+            ):
+
+                st.write(
+                    f"**Amount:** "
+                    f"PKR {row['Amount']:,.2f}"
+                )
+
+                st.write(
+                    f"**Risk:** "
+                    f"{row['Risk']} "
+                    f"({row['Risk Score']}/100)"
+                )
+
+                st.write(
+                    f"**Detected issue:** "
+                    f"{row['Issue']}"
+                )
+
+                # ------------------------------------------
+                # CHECK EXISTING HUMAN DECISION
+                # ------------------------------------------
+
+                existing_decision = None
+
+                if row["Invoice"]:
+                    existing_decision = (
+                        get_review_decision_for_invoice(
+                            row["Invoice"]
+                        )
+                    )
+
+                if existing_decision:
+
+                    st.success(
+                        f"Decision already recorded: "
+                        f"{existing_decision[7]}"
+                    )
+
+                    st.write(
+                        f"**Reason:** "
+                        f"{existing_decision[8] or 'No reason provided'}"
+                    )
+
+                    st.write(
+                        f"**Decided at:** "
+                        f"{existing_decision[9]}"
+                    )
+
+                    continue
+
+                # ------------------------------------------
+                # AI SESSION STATE
+                # ------------------------------------------
+
+                ai_key = (
+                    f"ai_result_"
+                    f"{row['Row']}_"
+                    f"{row['Invoice']}"
+                )
+
+                button_key = (
+                    f"ai_review_"
+                    f"{row['Row']}_"
+                    f"{row['Invoice']}"
+                )
+
+                if st.button(
+                    "Ask AI to Review",
+                    key=button_key
+                ):
+
+                    with st.spinner(
+                        "AI Finance Reviewer is analysing..."
+                    ):
+
+                        analysis = (
+                            review_invoice_with_ai(
+                                invoice_number=row["Invoice"],
+                                client_name=row["Client"],
+                                amount=row["Amount"],
+                                issue=row["Issue"],
+                                risk_score=row["Risk Score"]
+                            )
+                        )
+
+                    st.session_state[ai_key] = analysis
+
+                # ------------------------------------------
+                # SHOW AI RESULT
+                # ------------------------------------------
+
+                if ai_key in st.session_state:
+
+                    analysis = (
+                        st.session_state[ai_key]
+                    )
+
+                    st.markdown(
+                        "#### AI Analysis"
+                    )
+
+                    st.write(
+                        analysis["summary"]
+                    )
+
+                    st.markdown(
+                        "#### Recommended Check"
+                    )
+
+                    st.write(
+                        analysis["recommendation"]
+                    )
+
+                    if "error" in analysis:
+
+                        st.error(
+                            "AI review failed. "
+                            "Manual review is required."
+                        )
+
+                    else:
+
+                        st.divider()
+
+                        st.markdown(
+                            "#### Human Decision"
+                        )
+
+                        decision = st.radio(
+                            "Decision",
+                            [
+                                "Approve",
+                                "Hold",
+                                "Reject"
+                            ],
+                            horizontal=True,
+                            key=(
+                                f"decision_"
+                                f"{row['Row']}_"
+                                f"{row['Invoice']}"
+                            )
+                        )
+
+                        reason = st.text_area(
+                            "Decision reason",
+                            placeholder=(
+                                "Example: Verified against "
+                                "purchase order."
+                            ),
+                            key=(
+                                f"reason_"
+                                f"{row['Row']}_"
+                                f"{row['Invoice']}"
+                            )
+                        )
+
+                        save_key = (
+                            f"save_decision_"
+                            f"{row['Row']}_"
+                            f"{row['Invoice']}"
+                        )
+
+                        if st.button(
+                            "Save Decision",
+                            type="primary",
+                            key=save_key
+                        ):
+
+                            if not row["Invoice"]:
+
+                                st.error(
+                                    "Cannot save a decision "
+                                    "without an invoice number."
+                                )
+
+                            elif not reason.strip():
+
+                                st.warning(
+                                    "Add a short reason "
+                                    "before saving."
+                                )
+
+                            else:
+
+                                add_review_decision(
+                                    invoice_number=row["Invoice"],
+                                    client=row["Client"],
+                                    amount=row["Amount"],
+                                    risk_score=row["Risk Score"],
+                                    detected_issue=row["Issue"],
+                                    ai_summary=analysis["summary"],
+                                    ai_recommendation=(
+                                        analysis["recommendation"]
+                                    ),
+                                    decision=decision,
+                                    decision_reason=reason.strip()
+                                )
+
+                                # APPROVED
+                                if decision == "Approve":
+
+                                    if invoice_exists(
+                                        row["Invoice"]
+                                    ):
+
+                                        update_invoice_status(
+                                            row["Invoice"],
+                                            "Approved"
+                                        )
+
+                                    else:
+
+                                        add_invoice(
+                                            row["Invoice"],
+                                            row["Client"],
+                                            row["Amount"],
+                                            "Approved"
+                                        )
+
+                                # HOLD
+                                elif decision == "Hold":
+
+                                    if invoice_exists(
+                                        row["Invoice"]
+                                    ):
+
+                                        update_invoice_status(
+                                            row["Invoice"],
+                                            "Hold"
+                                        )
+
+                                # REJECT
+                                elif decision == "Reject":
+
+                                    if invoice_exists(
+                                        row["Invoice"]
+                                    ):
+
+                                        update_invoice_status(
+                                            row["Invoice"],
+                                            "Rejected"
+                                        )
+
+                                st.success(
+                                    f"{decision} decision saved."
+                                )
+
+                                st.balloons()
+
+                                del st.session_state[
+                                    ai_key
+                                ]
+
+                                st.rerun()
+
         if blocked_rows:
+
             st.error(
-                f"{len(blocked_rows)} invoice(s) are blocked "
-                "and will not be created."
+                f"{len(blocked_rows)} invoice(s) "
+                "are blocked from automatic creation."
             )
 
         if review_rows:
+
             st.warning(
-                f"{len(review_rows)} invoice(s) contain "
-                "unusual activity and require review."
+                f"{len(review_rows)} invoice(s) "
+                "require human review."
             )
 
     # --------------------------------------------------
-    # READY INVOICES
+    # SAFE DRAFTS
     # --------------------------------------------------
 
     if ready_rows:
 
-        st.subheader("Safe Drafts")
+        st.subheader(
+            "Safe Drafts"
+        )
 
         preview_rows = []
 
         for row in ready_rows:
+
             preview_rows.append({
                 "Invoice": row["Invoice"],
                 "Client": row["Client"],
-                "Amount": f"PKR {row['Amount']:,.2f}",
+                "Amount": (
+                    f"PKR {row['Amount']:,.2f}"
+                ),
                 "Risk": row["Risk"],
-                "Recommendation": row["Recommendation"]
+                "Recommendation": (
+                    row["Recommendation"]
+                )
             })
 
         st.dataframe(
@@ -523,19 +775,15 @@ def show_import_page():
         )
 
         st.success(
-            f"{len(ready_rows)} invoice(s) passed all automatic checks."
+            f"{len(ready_rows)} invoice(s) "
+            "passed all automatic checks."
         )
-
-        st.caption(
-            "Nothing is saved until you approve the safe drafts."
-        )
-
-        # --------------------------------------------------
-        # HUMAN APPROVAL
-        # --------------------------------------------------
 
         if st.button(
-            f"Approve & Create {len(ready_rows)} Safe Drafts",
+            (
+                f"Approve & Create "
+                f"{len(ready_rows)} Safe Drafts"
+            ),
             type="primary",
             width="stretch"
         ):
@@ -544,35 +792,89 @@ def show_import_page():
 
             for row in ready_rows:
 
-                add_invoice(
-                    row["Invoice"],
-                    row["Client"],
-                    row["Amount"],
-                    "Draft"
-                )
+                if not invoice_exists(
+                    row["Invoice"]
+                ):
 
-                created += 1
+                    add_invoice(
+                        row["Invoice"],
+                        row["Client"],
+                        row["Amount"],
+                        "Draft"
+                    )
+
+                    created += 1
 
             st.success(
-                f"{created} safe invoice drafts created successfully."
+                f"{created} safe invoice drafts "
+                "created successfully."
             )
 
             st.balloons()
 
-    elif not review_rows and not blocked_rows:
-
-        st.info(
-            "No invoices are available to process."
-        )
-
     # --------------------------------------------------
-    # FULL AUDIT VIEW
+    # FULL ANALYSIS
     # --------------------------------------------------
 
-    with st.expander("View Full Analysis"):
+    with st.expander(
+        "View Full Analysis"
+    ):
 
         st.dataframe(
             all_analysis,
             width="stretch",
             hide_index=True
         )
+
+    # --------------------------------------------------
+    # AUDIT HISTORY
+    # --------------------------------------------------
+
+    show_audit_history()
+
+
+# --------------------------------------------------
+# AUDIT HISTORY
+# --------------------------------------------------
+
+def show_audit_history():
+
+    st.divider()
+
+    st.subheader(
+        "Decision Audit Trail"
+    )
+
+    decisions = (
+        get_review_decisions()
+    )
+
+    if not decisions:
+
+        st.info(
+            "No human review decisions recorded yet."
+        )
+        return
+
+    audit_rows = []
+
+    for decision in decisions:
+
+        audit_rows.append({
+            "Invoice": decision[0],
+            "Client": decision[1],
+            "Amount": (
+                f"PKR {decision[2]:,.2f}"
+            ),
+            "Risk": decision[3],
+            "Issue": decision[4],
+            "Decision": decision[7],
+            "Reason": decision[8],
+            "Time": decision[9]
+        })
+
+    st.dataframe(
+        audit_rows,
+        width="stretch",
+        hide_index=True
+    )
