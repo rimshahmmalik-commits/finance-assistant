@@ -1,25 +1,35 @@
 import streamlit as st
 import pandas as pd
 
-from database.database import get_invoice_management_data
-from ai.finance_ai import generate_finance_insights
+from database.database import (
+    get_invoice_management_data,
+)
+
+from ai.finance_ai import (
+    generate_finance_insights,
+    generate_collection_priorities,
+)
 
 
 def show_analytics_page():
+
     st.title("Analytics")
 
     st.caption(
-        "Understand revenue, collections and outstanding invoice performance."
+        "Understand revenue, collections, risk and collection priorities."
     )
 
     invoices = get_invoice_management_data()
 
     if not invoices:
-        st.info("No invoice data available yet.")
+        st.info(
+            "No invoice data available yet."
+        )
         return
-        # --------------------------------------------------
+
+    # ==================================================
     # FINANCE INTELLIGENCE
-    # --------------------------------------------------
+    # ==================================================
 
     insights = generate_finance_insights(
         invoices
@@ -33,7 +43,10 @@ def show_analytics_page():
         title = insight["title"]
         message = insight["message"]
 
-        content = f"**{title}**\n\n{message}"
+        content = (
+            f"**{title}**\n\n"
+            f"{message}"
+        )
 
         if insight_type == "risk":
             st.error(content)
@@ -49,16 +62,111 @@ def show_analytics_page():
 
     st.divider()
 
+    # ==================================================
+    # COLLECTION PRIORITY ENGINE
+    # ==================================================
+
+    st.subheader("Collection Priorities")
+
+    st.caption(
+        "Invoices are ranked automatically by collection urgency."
+    )
+
+    priorities = generate_collection_priorities(
+        invoices
+    )
+
+    if not priorities:
+
+        st.success(
+            "No outstanding invoices currently require collection action."
+        )
+
+    else:
+
+        priority_rows = []
+
+        for item in priorities:
+
+            reasons = ", ".join(
+                item["reasons"]
+            )
+
+            priority_rows.append({
+                "Priority": item["priority"],
+                "Score": item["score"],
+                "Invoice": item["invoice_number"],
+                "Client": item["client"],
+                "Outstanding": (
+                    f"PKR {item['outstanding']:,.2f}"
+                ),
+                "Payment Progress": (
+                    f"{item['payment_progress']:.1f}%"
+                ),
+                "Days Overdue": (
+                    item["days_overdue"]
+                ),
+                "Due Date": (
+                    item["due_date"] or "—"
+                ),
+                "Why": reasons,
+                "Recommended Action": (
+                    item["action"]
+                ),
+            })
+
+        st.dataframe(
+            priority_rows,
+            width="stretch",
+            hide_index=True
+        )
+
+        top_priority = priorities[0]
+
+        st.markdown(
+            "#### Highest Collection Priority"
+        )
+
+        top_content = (
+            f"**{top_priority['priority']} Priority — "
+            f"{top_priority['invoice_number']}**\n\n"
+            f"{top_priority['client']} currently has "
+            f"PKR {top_priority['outstanding']:,.2f} outstanding.\n\n"
+            f"**Priority score:** {top_priority['score']}/100\n\n"
+            f"**Recommended action:** "
+            f"{top_priority['action']}"
+        )
+
+        if top_priority["priority"] == "Critical":
+            st.error(top_content)
+
+        elif top_priority["priority"] == "High":
+            st.warning(top_content)
+
+        else:
+            st.info(top_content)
+
+    st.divider()
+
+    # ==================================================
+    # BUILD FINANCE DATAFRAME
+    # ==================================================
+
     rows = []
 
     for invoice in invoices:
+
         invoice_number = invoice[0]
         client = invoice[1]
-        amount = float(invoice[2] or 0)
+        amount = float(
+            invoice[2] or 0
+        )
         status = invoice[3]
         invoice_date = invoice[4]
         due_date = invoice[5]
-        total_paid = float(invoice[6] or 0)
+        total_paid = float(
+            invoice[6] or 0
+        )
 
         outstanding = max(
             amount - total_paid,
@@ -76,49 +184,70 @@ def show_analytics_page():
             "Due Date": due_date,
         })
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(
+        rows
+    )
 
-    total_invoiced = df["Amount"].sum()
-    total_paid = df["Paid"].sum()
-    total_outstanding = df["Outstanding"].sum()
+    # ==================================================
+    # CORE METRICS
+    # ==================================================
+
+    total_invoiced = (
+        df["Amount"].sum()
+    )
+
+    total_paid = (
+        df["Paid"].sum()
+    )
+
+    total_outstanding = (
+        df["Outstanding"].sum()
+    )
 
     overdue_amount = df.loc[
-        df["Status"].str.lower() == "overdue",
+        df["Status"].str.lower()
+        == "overdue",
         "Outstanding"
     ].sum()
 
     if total_invoiced > 0:
+
         collection_rate = (
-            total_paid / total_invoiced
+            total_paid
+            / total_invoiced
         ) * 100
+
     else:
+
         collection_rate = 0
 
-    # --------------------------------------------------
-    # CORE METRICS
-    # --------------------------------------------------
-
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = (
+        st.columns(4)
+    )
 
     with col1:
+
         st.metric(
             "Total Invoiced",
             f"PKR {total_invoiced:,.2f}"
         )
 
     with col2:
+
         st.metric(
             "Collected",
             f"PKR {total_paid:,.2f}"
         )
 
     with col3:
+
         st.metric(
             "Outstanding",
             f"PKR {total_outstanding:,.2f}"
         )
 
     with col4:
+
         st.metric(
             "Collection Rate",
             f"{collection_rate:.1f}%"
@@ -126,24 +255,31 @@ def show_analytics_page():
 
     st.divider()
 
-    # --------------------------------------------------
-    # OVERDUE
-    # --------------------------------------------------
+    # ==================================================
+    # COLLECTIONS RISK
+    # ==================================================
 
-    st.subheader("Collections Risk")
+    st.subheader(
+        "Collections Risk"
+    )
 
-    risk1, risk2 = st.columns(2)
+    risk1, risk2 = (
+        st.columns(2)
+    )
 
     with risk1:
+
         st.metric(
             "Overdue Amount",
             f"PKR {overdue_amount:,.2f}"
         )
 
     with risk2:
+
         overdue_count = len(
             df[
-                df["Status"].str.lower()
+                df["Status"]
+                .str.lower()
                 == "overdue"
             ]
         )
@@ -155,14 +291,19 @@ def show_analytics_page():
 
     st.divider()
 
-    # --------------------------------------------------
+    # ==================================================
     # CLIENT EXPOSURE
-    # --------------------------------------------------
+    # ==================================================
 
-    st.subheader("Outstanding by Client")
+    st.subheader(
+        "Outstanding by Client"
+    )
 
     client_summary = (
-        df.groupby("Client", as_index=False)
+        df.groupby(
+            "Client",
+            as_index=False
+        )
         .agg({
             "Amount": "sum",
             "Paid": "sum",
@@ -181,23 +322,30 @@ def show_analytics_page():
     )
 
     st.bar_chart(
-        client_summary.set_index(
+        client_summary
+        .set_index(
             "Client"
         )["Outstanding"]
     )
 
     st.divider()
 
-    # --------------------------------------------------
+    # ==================================================
     # INVOICE STATUS
-    # --------------------------------------------------
+    # ==================================================
 
-    st.subheader("Invoice Status")
+    st.subheader(
+        "Invoice Status"
+    )
 
     status_summary = (
-        df.groupby("Status")
+        df.groupby(
+            "Status"
+        )
         .size()
-        .reset_index(name="Invoices")
+        .reset_index(
+            name="Invoices"
+        )
     )
 
     st.dataframe(
@@ -207,40 +355,58 @@ def show_analytics_page():
     )
 
     st.bar_chart(
-        status_summary.set_index(
+        status_summary
+        .set_index(
             "Status"
         )["Invoices"]
     )
 
     st.divider()
 
-    # --------------------------------------------------
-    # COLLECTION TREND
-    # --------------------------------------------------
+    # ==================================================
+    # INVOICE TREND
+    # ==================================================
 
-    st.subheader("Invoice Trend")
+    st.subheader(
+        "Invoice Trend"
+    )
 
-    trend_df = df.copy()
+    trend_df = (
+        df.copy()
+    )
 
-    trend_df["Invoice Date"] = pd.to_datetime(
-        trend_df["Invoice Date"],
+    trend_df[
+        "Invoice Date"
+    ] = pd.to_datetime(
+        trend_df[
+            "Invoice Date"
+        ],
         errors="coerce"
     )
 
-    trend_df = trend_df.dropna(
-        subset=["Invoice Date"]
+    trend_df = (
+        trend_df.dropna(
+            subset=[
+                "Invoice Date"
+            ]
+        )
     )
 
     if trend_df.empty:
+
         st.info(
-            "Not enough dated invoice data for trend analysis yet."
+            "Not enough dated invoice data "
+            "for trend analysis yet."
         )
 
     else:
+
         monthly = (
             trend_df
             .groupby(
-                trend_df["Invoice Date"]
+                trend_df[
+                    "Invoice Date"
+                ]
                 .dt.to_period("M")
                 .astype(str)
             )
@@ -256,30 +422,43 @@ def show_analytics_page():
 
     st.divider()
 
-    # --------------------------------------------------
+    # ==================================================
     # FULL FINANCE TABLE
-    # --------------------------------------------------
+    # ==================================================
 
-    st.subheader("Finance Detail")
+    st.subheader(
+        "Finance Detail"
+    )
 
-    display_df = df.copy()
+    display_df = (
+        df.copy()
+    )
 
-    display_df["Amount"] = display_df[
+    display_df[
+        "Amount"
+    ] = display_df[
         "Amount"
     ].map(
-        lambda x: f"PKR {x:,.2f}"
+        lambda x:
+        f"PKR {x:,.2f}"
     )
 
-    display_df["Paid"] = display_df[
+    display_df[
+        "Paid"
+    ] = display_df[
         "Paid"
     ].map(
-        lambda x: f"PKR {x:,.2f}"
+        lambda x:
+        f"PKR {x:,.2f}"
     )
 
-    display_df["Outstanding"] = display_df[
+    display_df[
+        "Outstanding"
+    ] = display_df[
         "Outstanding"
     ].map(
-        lambda x: f"PKR {x:,.2f}"
+        lambda x:
+        f"PKR {x:,.2f}"
     )
 
     st.dataframe(

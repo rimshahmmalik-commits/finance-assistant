@@ -23,6 +23,7 @@ from database.database import (
     update_invoice_dates,
     update_overdue_invoices,
     add_payment_event,
+    get_payment_summary,
 )
 
 
@@ -442,7 +443,22 @@ def show_invoices_page():
         status = invoice[3]
         invoice_date = invoice[4]
         due_date = invoice[5]
-        total_paid = float(invoice[6] or 0)
+        payment_summary = get_payment_summary(
+            invoice_number
+        )
+
+        if payment_summary:
+            total_paid = payment_summary["total_paid"]
+            remaining_balance = payment_summary["remaining"]
+            payment_count = payment_summary["payment_count"]
+            last_payment_at = payment_summary["last_payment_at"]
+            is_paid = payment_summary["is_paid"]
+        else:
+            total_paid = 0.0
+            remaining_balance = float(amount)
+            payment_count = 0
+            last_payment_at = None
+            is_paid = False
 
         due_message = get_due_message(
             due_date,
@@ -633,11 +649,6 @@ def show_invoices_page():
 
             st.markdown("### Payment Tracking")
 
-            remaining_balance = max(
-                amount - total_paid,
-                0
-            )
-
             if total_paid <= 0:
                 payment_state = "Unpaid"
 
@@ -647,7 +658,7 @@ def show_invoices_page():
             else:
                 payment_state = "Paid"
 
-            pay1, pay2, pay3 = st.columns(3)
+            pay1, pay2, pay3, pay4 = st.columns(4)
 
             with pay1:
                 st.metric(
@@ -665,6 +676,17 @@ def show_invoices_page():
                 st.metric(
                     "Payment State",
                     payment_state
+                )
+
+            with pay4:
+                st.metric(
+                    "Payments",
+                    payment_count
+                )
+
+            if last_payment_at:
+                st.caption(
+                    f"Last payment recorded: {last_payment_at}"
                 )
 
             # ------------------------------------------
@@ -729,11 +751,21 @@ def show_invoices_page():
                             )
 
                             if new_payment_status == "Paid":
-
                                 update_invoice_status(
                                     invoice_number,
                                     "Paid"
                                 )
+
+                            elif new_payment_status == "Partially Paid":
+                                if status not in (
+                                    "Hold",
+                                    "Rejected",
+                                    "Overdue"
+                                ):
+                                    update_invoice_status(
+                                        invoice_number,
+                                        "Pending"
+                                    )
 
                             st.success(
                                 f"Payment of PKR "
@@ -784,7 +816,7 @@ def show_invoices_page():
 
                 st.dataframe(
                     payment_history,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True
                 )
 
