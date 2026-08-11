@@ -1,3 +1,4 @@
+from views.analytics import show_analytics_page
 import streamlit as st
 from views.reminders import show_reminders_page
 
@@ -52,6 +53,7 @@ elif page == "Invoices":
     show_invoices_page()
 
 elif page == "Analytics":
+    show_analytics_page()
     st.title("Analytics")
     st.info("Coming soon.")
 

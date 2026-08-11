@@ -15,15 +15,14 @@ from reportlab.platypus import (
 
 from database.database import (
     add_invoice,
-    get_invoice_details,
+    get_invoice_management_data,
+    get_all_payment_events_grouped,
     get_clients,
     invoice_exists,
     update_invoice_status,
     update_invoice_dates,
     update_overdue_invoices,
     add_payment_event,
-    get_payment_events,
-    get_total_paid_for_invoice,
 )
 
 
@@ -371,7 +370,11 @@ def show_invoices_page():
 
     st.subheader("Invoice Management")
 
-    invoices = get_invoice_details()
+    invoices = get_invoice_management_data()
+
+    payment_events_by_invoice = (
+        get_all_payment_events_grouped()
+    )
 
     if not invoices:
         st.info("No invoices yet.")
@@ -439,6 +442,7 @@ def show_invoices_page():
         status = invoice[3]
         invoice_date = invoice[4]
         due_date = invoice[5]
+        total_paid = float(invoice[6] or 0)
 
         due_message = get_due_message(
             due_date,
@@ -629,10 +633,6 @@ def show_invoices_page():
 
             st.markdown("### Payment Tracking")
 
-            total_paid = get_total_paid_for_invoice(
-                invoice_number
-            )
-
             remaining_balance = max(
                 amount - total_paid,
                 0
@@ -752,8 +752,11 @@ def show_invoices_page():
             # PAYMENT HISTORY
             # ------------------------------------------
 
-            payment_events = get_payment_events(
-                invoice_number
+            payment_events = (
+                payment_events_by_invoice.get(
+                    invoice_number,
+                    []
+                )
             )
 
             if payment_events:
