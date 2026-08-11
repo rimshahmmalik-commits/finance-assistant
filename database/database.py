@@ -40,7 +40,15 @@ def get_connection():
 # INITIAL SETUP
 # --------------------------------------------------
 
+_TABLES_READY = False
+
+
 def create_tables():
+    global _TABLES_READY
+
+    if _TABLES_READY:
+        return
+
     create_clients_table()
     create_invoice_table()
     create_review_decisions_table()
@@ -49,6 +57,9 @@ def create_tables():
     create_transactions_table()
     create_category_rules_table()
     create_business_settings_table()
+    create_business_categories_table()
+
+    _TABLES_READY = True
 
 
 def create_clients_table():
@@ -565,12 +576,147 @@ def create_reminder_events_table():
 # BUSINESS SETTINGS
 # --------------------------------------------------
 
+BUSINESS_TYPES = [
+    "Retail / Boutique",
+    "Salon / Beauty",
+    "Tutoring / Education",
+    "Restaurant / Food",
+    "Professional Services",
+    "Wholesale / Distribution",
+    "E-commerce",
+    "Other",
+]
+
+INDUSTRY_CATEGORY_DEFAULTS = {
+    "Retail / Boutique": {
+        "Income": ["Sales", "Other Income"],
+        "Expense": [
+            "Inventory",
+            "Packaging",
+            "Delivery",
+            "Marketing",
+            "Rent",
+            "Utilities",
+            "Payroll",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "Salon / Beauty": {
+        "Income": ["Services", "Product Sales", "Other Income"],
+        "Expense": [
+            "Beauty Supplies",
+            "Staff Payments",
+            "Rent",
+            "Utilities",
+            "Marketing",
+            "Laundry",
+            "Transport",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "Tutoring / Education": {
+        "Income": ["Student Fees", "Course Sales", "Other Income"],
+        "Expense": [
+            "Teacher Payments",
+            "Rent",
+            "Utilities",
+            "Educational Materials",
+            "Marketing",
+            "Software",
+            "Transport",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "Restaurant / Food": {
+        "Income": ["Food Sales", "Delivery Sales", "Other Income"],
+        "Expense": [
+            "Ingredients",
+            "Packaging",
+            "Delivery",
+            "Payroll",
+            "Rent",
+            "Utilities",
+            "Marketing",
+            "Equipment",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "Professional Services": {
+        "Income": ["Services", "Consulting", "Other Income"],
+        "Expense": [
+            "Payroll",
+            "Rent",
+            "Utilities",
+            "Software",
+            "Marketing",
+            "Travel",
+            "Office Supplies",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "Wholesale / Distribution": {
+        "Income": ["Sales", "Other Income"],
+        "Expense": [
+            "Inventory",
+            "Freight",
+            "Warehousing",
+            "Transport",
+            "Payroll",
+            "Rent",
+            "Utilities",
+            "Marketing",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "E-commerce": {
+        "Income": ["Online Sales", "Other Income"],
+        "Expense": [
+            "Inventory",
+            "Packaging",
+            "Courier",
+            "Marketplace Fees",
+            "Marketing",
+            "Software",
+            "Returns",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+    "Other": {
+        "Income": ["Sales", "Services", "Other Income"],
+        "Expense": [
+            "Inventory",
+            "Rent",
+            "Utilities",
+            "Payroll",
+            "Transport",
+            "Marketing",
+            "Office",
+            "Bank Fees",
+            "Taxes",
+            "Other Expense",
+        ],
+    },
+}
+
+
 def create_business_settings_table():
     """
     Create and safely upgrade the single-business settings table.
-
-    The ALTER TABLE statements make this compatible with the smaller
-    settings table created earlier, so existing saved business data is kept.
+    Existing values are preserved.
     """
     with get_connection() as conn:
         with conn.cursor() as cursor:
@@ -578,6 +724,7 @@ def create_business_settings_table():
                 CREATE TABLE IF NOT EXISTS business_settings(
                     id INTEGER PRIMARY KEY,
                     business_name TEXT DEFAULT '',
+                    business_type TEXT DEFAULT 'Other',
                     business_email TEXT DEFAULT '',
                     business_phone TEXT DEFAULT '',
                     business_address TEXT DEFAULT '',
@@ -593,7 +740,11 @@ def create_business_settings_table():
                 )
             """)
 
-            # Upgrade older versions of the table without deleting data.
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS business_type TEXT DEFAULT 'Other'
+            """)
+
             cursor.execute("""
                 ALTER TABLE business_settings
                 ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'Asia/Karachi'
@@ -633,6 +784,7 @@ def create_business_settings_table():
                 INSERT INTO business_settings(
                     id,
                     business_name,
+                    business_type,
                     business_email,
                     business_phone,
                     business_address,
@@ -649,6 +801,7 @@ def create_business_settings_table():
                 VALUES (
                     1,
                     '',
+                    'Other',
                     '',
                     '',
                     '',
@@ -666,18 +819,31 @@ def create_business_settings_table():
             """)
 
 
-def get_business_settings():
+def create_business_categories_table():
     """
-    Return the current business settings using the exact keys expected
-    by views/settings.py.
+    Stores categories that belong to this business.
     """
-    create_business_settings_table()
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS business_categories(
+                    id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+                    category_name TEXT NOT NULL,
+                    category_type TEXT NOT NULL,
+                    is_system BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(category_name, category_type)
+                )
+            """)
 
+
+def get_business_settings():
     with get_connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("""
                 SELECT
                     business_name,
+                    business_type,
                     business_email,
                     business_phone,
                     business_address,
@@ -699,6 +865,7 @@ def get_business_settings():
     if not row:
         return {
             "business_name": "",
+            "business_type": "Other",
             "email": "",
             "phone": "",
             "address": "",
@@ -714,28 +881,30 @@ def get_business_settings():
 
     return {
         "business_name": row[0] or "",
-        "email": row[1] or "",
-        "phone": row[2] or "",
-        "address": row[3] or "",
-        "currency": row[4] or "PKR",
-        "timezone": row[5] or "Asia/Karachi",
-        "payment_terms": int(row[6] if row[6] is not None else 30),
-        "invoice_prefix": row[7] or "INV",
-        "tax_rate": float(row[8] if row[8] is not None else 0),
+        "business_type": row[1] or "Other",
+        "email": row[2] or "",
+        "phone": row[3] or "",
+        "address": row[4] or "",
+        "currency": row[5] or "PKR",
+        "timezone": row[6] or "Asia/Karachi",
+        "payment_terms": int(row[7] if row[7] is not None else 30),
+        "invoice_prefix": row[8] or "INV",
+        "tax_rate": float(row[9] if row[9] is not None else 0),
         "reminders_enabled": bool(
-            True if row[9] is None else row[9]
+            True if row[10] is None else row[10]
         ),
         "reminder_days_before": int(
-            row[10] if row[10] is not None else 3
+            row[11] if row[11] is not None else 3
         ),
         "overdue_reminders_enabled": bool(
-            True if row[11] is None else row[11]
+            True if row[12] is None else row[12]
         ),
     }
 
 
 def save_business_settings(
     business_name,
+    business_type,
     email,
     phone,
     address,
@@ -748,12 +917,8 @@ def save_business_settings(
     reminder_days_before,
     overdue_reminders_enabled
 ):
-    """
-    Save the complete Settings page state without affecting finance data.
-    """
-    create_business_settings_table()
-
     business_name = str(business_name or "").strip()
+    business_type = str(business_type or "Other").strip() or "Other"
     email = str(email or "").strip()
     phone = str(phone or "").strip()
     address = str(address or "").strip()
@@ -772,6 +937,7 @@ def save_business_settings(
                 INSERT INTO business_settings(
                     id,
                     business_name,
+                    business_type,
                     business_email,
                     business_phone,
                     business_address,
@@ -786,13 +952,14 @@ def save_business_settings(
                     updated_at
                 )
                 VALUES (
-                    1, %s, %s, %s, %s, %s, %s,
+                    1, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (id)
                 DO UPDATE SET
                     business_name = EXCLUDED.business_name,
+                    business_type = EXCLUDED.business_type,
                     business_email = EXCLUDED.business_email,
                     business_phone = EXCLUDED.business_phone,
                     business_address = EXCLUDED.business_address,
@@ -808,6 +975,7 @@ def save_business_settings(
                 """,
                 (
                     business_name,
+                    business_type,
                     email,
                     phone,
                     address,
@@ -823,6 +991,166 @@ def save_business_settings(
             )
 
     return get_business_settings()
+
+
+def ensure_business_categories(business_type=None):
+    """
+    Add suggested categories if the business has no categories yet.
+    """
+    if not business_type:
+        business_type = get_business_settings()["business_type"]
+
+    defaults = INDUSTRY_CATEGORY_DEFAULTS.get(
+        business_type,
+        INDUSTRY_CATEGORY_DEFAULTS["Other"]
+    )
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT COUNT(*)
+                FROM business_categories
+            """)
+            count = int(cursor.fetchone()[0] or 0)
+
+            if count > 0:
+                return
+
+            for category_type, names in defaults.items():
+                for name in names:
+                    cursor.execute(
+                        """
+                        INSERT INTO business_categories(
+                            category_name,
+                            category_type,
+                            is_system
+                        )
+                        VALUES (%s, %s, TRUE)
+                        ON CONFLICT(category_name, category_type)
+                        DO NOTHING
+                        """,
+                        (
+                            name,
+                            category_type
+                        )
+                    )
+
+
+def get_business_categories(category_type=None):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            if category_type:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        category_name,
+                        category_type,
+                        is_system
+                    FROM business_categories
+                    WHERE LOWER(category_type) = LOWER(%s)
+                    ORDER BY category_name
+                    """,
+                    (category_type,)
+                )
+            else:
+                cursor.execute("""
+                    SELECT
+                        id,
+                        category_name,
+                        category_type,
+                        is_system
+                    FROM business_categories
+                    ORDER BY category_type, category_name
+                """)
+
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "name": row[1],
+            "type": row[2],
+            "is_system": bool(row[3]),
+        }
+        for row in rows
+    ]
+
+
+def add_business_category(category_name, category_type):
+    category_name = str(category_name or "").strip()
+    category_type = str(category_type or "").strip().title()
+
+    if not category_name:
+        raise ValueError("Category name is required.")
+
+    if category_type not in ("Income", "Expense"):
+        raise ValueError("Category type must be Income or Expense.")
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO business_categories(
+                    category_name,
+                    category_type,
+                    is_system
+                )
+                VALUES (%s, %s, FALSE)
+                ON CONFLICT(category_name, category_type)
+                DO NOTHING
+                """,
+                (
+                    category_name,
+                    category_type
+                )
+            )
+
+
+def update_business_category(category_id, new_name):
+    new_name = str(new_name or "").strip()
+
+    if not new_name:
+        raise ValueError("Category name cannot be empty.")
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE business_categories
+                SET category_name = %s
+                WHERE id = %s
+                """,
+                (
+                    new_name,
+                    int(category_id)
+                )
+            )
+
+
+def delete_business_category(category_id):
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE FROM business_categories
+                WHERE id = %s
+                """,
+                (int(category_id),)
+            )
+
+
+def reset_business_categories_to_industry_defaults():
+    settings = get_business_settings()
+    business_type = settings["business_type"]
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM business_categories
+            """)
+
+    ensure_business_categories(business_type)
 
 
 # --------------------------------------------------
