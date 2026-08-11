@@ -48,6 +48,7 @@ def create_tables():
     create_reminder_events_table()
     create_transactions_table()
     create_category_rules_table()
+    create_business_settings_table()
 
 
 def create_clients_table():
@@ -559,6 +560,269 @@ def create_reminder_events_table():
                     recorded_at TEXT NOT NULL
                 )
             """)
+
+# --------------------------------------------------
+# BUSINESS SETTINGS
+# --------------------------------------------------
+
+def create_business_settings_table():
+    """
+    Create and safely upgrade the single-business settings table.
+
+    The ALTER TABLE statements make this compatible with the smaller
+    settings table created earlier, so existing saved business data is kept.
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS business_settings(
+                    id INTEGER PRIMARY KEY,
+                    business_name TEXT DEFAULT '',
+                    business_email TEXT DEFAULT '',
+                    business_phone TEXT DEFAULT '',
+                    business_address TEXT DEFAULT '',
+                    currency TEXT DEFAULT 'PKR',
+                    timezone TEXT DEFAULT 'Asia/Karachi',
+                    payment_terms INTEGER DEFAULT 30,
+                    invoice_prefix TEXT DEFAULT 'INV',
+                    tax_rate DOUBLE PRECISION DEFAULT 0,
+                    reminders_enabled BOOLEAN DEFAULT TRUE,
+                    reminder_days_before INTEGER DEFAULT 3,
+                    overdue_reminders_enabled BOOLEAN DEFAULT TRUE,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Upgrade older versions of the table without deleting data.
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'Asia/Karachi'
+            """)
+
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS payment_terms INTEGER DEFAULT 30
+            """)
+
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS invoice_prefix TEXT DEFAULT 'INV'
+            """)
+
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS tax_rate DOUBLE PRECISION DEFAULT 0
+            """)
+
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS reminders_enabled BOOLEAN DEFAULT TRUE
+            """)
+
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS reminder_days_before INTEGER DEFAULT 3
+            """)
+
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS overdue_reminders_enabled BOOLEAN DEFAULT TRUE
+            """)
+
+            cursor.execute("""
+                INSERT INTO business_settings(
+                    id,
+                    business_name,
+                    business_email,
+                    business_phone,
+                    business_address,
+                    currency,
+                    timezone,
+                    payment_terms,
+                    invoice_prefix,
+                    tax_rate,
+                    reminders_enabled,
+                    reminder_days_before,
+                    overdue_reminders_enabled,
+                    updated_at
+                )
+                VALUES (
+                    1,
+                    '',
+                    '',
+                    '',
+                    '',
+                    'PKR',
+                    'Asia/Karachi',
+                    30,
+                    'INV',
+                    0,
+                    TRUE,
+                    3,
+                    TRUE,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (id) DO NOTHING
+            """)
+
+
+def get_business_settings():
+    """
+    Return the current business settings using the exact keys expected
+    by views/settings.py.
+    """
+    create_business_settings_table()
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    business_name,
+                    business_email,
+                    business_phone,
+                    business_address,
+                    currency,
+                    timezone,
+                    payment_terms,
+                    invoice_prefix,
+                    tax_rate,
+                    reminders_enabled,
+                    reminder_days_before,
+                    overdue_reminders_enabled
+                FROM business_settings
+                WHERE id = 1
+                LIMIT 1
+            """)
+
+            row = cursor.fetchone()
+
+    if not row:
+        return {
+            "business_name": "",
+            "email": "",
+            "phone": "",
+            "address": "",
+            "currency": "PKR",
+            "timezone": "Asia/Karachi",
+            "payment_terms": 30,
+            "invoice_prefix": "INV",
+            "tax_rate": 0.0,
+            "reminders_enabled": True,
+            "reminder_days_before": 3,
+            "overdue_reminders_enabled": True,
+        }
+
+    return {
+        "business_name": row[0] or "",
+        "email": row[1] or "",
+        "phone": row[2] or "",
+        "address": row[3] or "",
+        "currency": row[4] or "PKR",
+        "timezone": row[5] or "Asia/Karachi",
+        "payment_terms": int(row[6] if row[6] is not None else 30),
+        "invoice_prefix": row[7] or "INV",
+        "tax_rate": float(row[8] if row[8] is not None else 0),
+        "reminders_enabled": bool(
+            True if row[9] is None else row[9]
+        ),
+        "reminder_days_before": int(
+            row[10] if row[10] is not None else 3
+        ),
+        "overdue_reminders_enabled": bool(
+            True if row[11] is None else row[11]
+        ),
+    }
+
+
+def save_business_settings(
+    business_name,
+    email,
+    phone,
+    address,
+    currency,
+    timezone,
+    payment_terms,
+    invoice_prefix,
+    tax_rate,
+    reminders_enabled,
+    reminder_days_before,
+    overdue_reminders_enabled
+):
+    """
+    Save the complete Settings page state without affecting finance data.
+    """
+    create_business_settings_table()
+
+    business_name = str(business_name or "").strip()
+    email = str(email or "").strip()
+    phone = str(phone or "").strip()
+    address = str(address or "").strip()
+    currency = str(currency or "PKR").strip() or "PKR"
+    timezone = str(timezone or "Asia/Karachi").strip() or "Asia/Karachi"
+    invoice_prefix = str(invoice_prefix or "INV").strip().upper() or "INV"
+
+    payment_terms = max(0, int(payment_terms))
+    tax_rate = max(0.0, float(tax_rate))
+    reminder_days_before = max(0, int(reminder_days_before))
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO business_settings(
+                    id,
+                    business_name,
+                    business_email,
+                    business_phone,
+                    business_address,
+                    currency,
+                    timezone,
+                    payment_terms,
+                    invoice_prefix,
+                    tax_rate,
+                    reminders_enabled,
+                    reminder_days_before,
+                    overdue_reminders_enabled,
+                    updated_at
+                )
+                VALUES (
+                    1, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (id)
+                DO UPDATE SET
+                    business_name = EXCLUDED.business_name,
+                    business_email = EXCLUDED.business_email,
+                    business_phone = EXCLUDED.business_phone,
+                    business_address = EXCLUDED.business_address,
+                    currency = EXCLUDED.currency,
+                    timezone = EXCLUDED.timezone,
+                    payment_terms = EXCLUDED.payment_terms,
+                    invoice_prefix = EXCLUDED.invoice_prefix,
+                    tax_rate = EXCLUDED.tax_rate,
+                    reminders_enabled = EXCLUDED.reminders_enabled,
+                    reminder_days_before = EXCLUDED.reminder_days_before,
+                    overdue_reminders_enabled = EXCLUDED.overdue_reminders_enabled,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    business_name,
+                    email,
+                    phone,
+                    address,
+                    currency,
+                    timezone,
+                    payment_terms,
+                    invoice_prefix,
+                    tax_rate,
+                    bool(reminders_enabled),
+                    reminder_days_before,
+                    bool(overdue_reminders_enabled),
+                )
+            )
+
+    return get_business_settings()
 
 
 # --------------------------------------------------

@@ -9,10 +9,7 @@ from views.imports import show_import_page
 from views.reminders import show_reminders_page
 from views.analytics import show_analytics_page
 from views.transactions import show_transactions_page
-from views.reports import show_reports_page
-from views.forecast import show_forecast_page
-from views.transaction_import import show_transaction_import_page
-from views.ai_assistant import show_ai_assistant_page
+from views.settings import show_settings_page
 
 
 st.set_page_config(
@@ -22,15 +19,12 @@ st.set_page_config(
 )
 
 
-# Create any missing database tables
+# Create any missing database tables.
 create_tables()
 
 
-# --------------------------------------------------
-# SIDEBAR
-# --------------------------------------------------
-
 st.sidebar.title("Finance Assistant")
+
 
 page = st.sidebar.radio(
     "Navigation",
@@ -40,9 +34,6 @@ page = st.sidebar.radio(
         "Clients",
         "Invoices",
         "Transactions",
-        "Smart Transaction Import",
-        "Reports",
-        "Cash Flow Forecast",
         "Reminder Center",
         "Analytics",
         "AI Assistant",
@@ -50,10 +41,6 @@ page = st.sidebar.radio(
     ]
 )
 
-
-# --------------------------------------------------
-# PAGE ROUTING
-# --------------------------------------------------
 
 if page == "Dashboard":
     show_dashboard_page()
@@ -70,15 +57,6 @@ elif page == "Invoices":
 elif page == "Transactions":
     show_transactions_page()
 
-elif page == "Smart Transaction Import":
-    show_transaction_import_page()
-
-elif page == "Reports":
-    show_reports_page()
-
-elif page == "Cash Flow Forecast":
-    show_forecast_page()
-
 elif page == "Reminder Center":
     show_reminders_page()
 
@@ -86,8 +64,8 @@ elif page == "Analytics":
     show_analytics_page()
 
 elif page == "AI Assistant":
-    show_ai_assistant_page()
+    st.title("AI Assistant")
+    st.info("Coming soon.")
 
 elif page == "Settings":
-    st.title("Settings")
-    st.info("Coming soon.")
+    show_settings_page()
