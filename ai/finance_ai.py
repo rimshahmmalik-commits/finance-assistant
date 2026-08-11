@@ -536,8 +536,6 @@ def generate_collection_priorities(invoices):
 
     return priorities
 
-from datetime import date, timedelta
-
 
 def generate_cash_flow_forecast(
     transactions,
@@ -926,4 +924,378 @@ def generate_cash_flow_forecast(
                 "because live account balances are not yet connected."
             ),
         ],
+    }
+
+
+# ==================================================
+# FINANCIAL ADVISOR INTELLIGENCE
+# ==================================================
+
+
+def generate_advisor_intelligence(
+    invoices,
+    transactions=None
+):
+    """
+    Turn verified invoice and transaction data into prioritized
+    business risks and actions.
+
+    This engine is deterministic: every financial figure comes
+    directly from the supplied records. It does not invent values.
+    """
+
+    transactions = transactions or []
+    today = date.today()
+
+    total_invoiced = 0.0
+    total_paid = 0.0
+    total_outstanding = 0.0
+    overdue_total = 0.0
+    overdue_count = 0
+
+    client_outstanding = {}
+    overdue_items = []
+
+    # --------------------------------------------------
+    # RECEIVABLES
+    # --------------------------------------------------
+
+    for invoice in invoices or []:
+        try:
+            invoice_number = invoice[0]
+            client = str(invoice[1] or "Unknown Client")
+            amount = float(invoice[2] or 0)
+            due_date = invoice[5]
+            paid = float(invoice[6] or 0)
+        except (IndexError, TypeError, ValueError):
+            continue
+
+        outstanding = max(amount - paid, 0)
+
+        total_invoiced += amount
+        total_paid += paid
+        total_outstanding += outstanding
+
+        if outstanding > 0:
+            client_outstanding[client] = (
+                client_outstanding.get(client, 0.0)
+                + outstanding
+            )
+
+        if outstanding > 0 and due_date:
+            try:
+                parsed_due = (
+                    due_date
+                    if isinstance(due_date, date)
+                    else date.fromisoformat(str(due_date))
+                )
+            except (TypeError, ValueError):
+                parsed_due = None
+
+            if parsed_due and parsed_due < today:
+                days_overdue = (
+                    today - parsed_due
+                ).days
+
+                overdue_count += 1
+                overdue_total += outstanding
+
+                overdue_items.append({
+                    "invoice": invoice_number,
+                    "client": client,
+                    "outstanding": outstanding,
+                    "days_overdue": days_overdue,
+                    "due_date": parsed_due.isoformat(),
+                })
+
+    # --------------------------------------------------
+    # TRANSACTION POSITION
+    # --------------------------------------------------
+
+    income = 0.0
+    expenses = 0.0
+    expense_categories = {}
+
+    for transaction in transactions:
+        try:
+            transaction_type = str(
+                transaction[2] or ""
+            ).strip().lower()
+
+            amount = float(
+                transaction[4] or 0
+            )
+
+            category = str(
+                transaction[5] or "Uncategorized"
+            ).strip()
+
+        except (IndexError, TypeError, ValueError):
+            continue
+
+        if transaction_type == "income":
+            income += amount
+
+        elif transaction_type == "expense":
+            expenses += amount
+
+            expense_categories[category] = (
+                expense_categories.get(category, 0.0)
+                + amount
+            )
+
+    net_cash_flow = income - expenses
+
+    collection_rate = (
+        (total_paid / total_invoiced) * 100
+        if total_invoiced > 0
+        else 0.0
+    )
+
+    risks = []
+
+    # --------------------------------------------------
+    # OVERDUE COLLECTION RISK
+    # --------------------------------------------------
+
+    if overdue_count > 0:
+        severity = (
+            "critical"
+            if overdue_total >= 500000
+            else "high"
+        )
+
+        risks.append({
+            "severity": severity,
+            "area": "Collections",
+            "title": "Overdue receivables need attention",
+            "message": (
+                f"{overdue_count} invoice(s) worth "
+                f"PKR {overdue_total:,.2f} are past due."
+            ),
+            "action": (
+                "Contact the highest-value overdue customers first "
+                "and confirm a payment date."
+            ),
+            "score": 95 if severity == "critical" else 80,
+        })
+
+    # --------------------------------------------------
+    # COLLECTION PERFORMANCE
+    # --------------------------------------------------
+
+    if total_invoiced > 0 and collection_rate < 50:
+        risks.append({
+            "severity": "high",
+            "area": "Collections",
+            "title": "Collection performance is weak",
+            "message": (
+                f"Only {collection_rate:.1f}% of recorded "
+                f"invoiced value has been collected."
+            ),
+            "action": (
+                "Prioritize receivables follow-up before extending "
+                "additional credit to slow-paying customers."
+            ),
+            "score": 78,
+        })
+
+    # --------------------------------------------------
+    # CUSTOMER CONCENTRATION
+    # --------------------------------------------------
+
+    if total_outstanding > 0 and client_outstanding:
+        top_client = max(
+            client_outstanding,
+            key=client_outstanding.get
+        )
+
+        top_balance = client_outstanding[
+            top_client
+        ]
+
+        concentration = (
+            top_balance
+            / total_outstanding
+            * 100
+        )
+
+        if concentration >= 50:
+            risks.append({
+                "severity": "high",
+                "area": "Customer Risk",
+                "title": "Receivables are concentrated",
+                "message": (
+                    f"{top_client} represents "
+                    f"{concentration:.1f}% of outstanding "
+                    f"receivables "
+                    f"(PKR {top_balance:,.2f})."
+                ),
+                "action": (
+                    "Reduce dependency on this single balance and "
+                    "monitor its collection closely."
+                ),
+                "score": 75,
+            })
+
+    # --------------------------------------------------
+    # CASH-FLOW PRESSURE
+    # --------------------------------------------------
+
+    if transactions and net_cash_flow < 0:
+        risks.append({
+            "severity": "high",
+            "area": "Cash Flow",
+            "title": "Recorded cash flow is negative",
+            "message": (
+                f"Recorded expenses exceed income by "
+                f"PKR {abs(net_cash_flow):,.2f}."
+            ),
+            "action": (
+                "Review the largest expenses and accelerate "
+                "collection of outstanding invoices."
+            ),
+            "score": 85,
+        })
+
+    # --------------------------------------------------
+    # EXPENSE CONCENTRATION
+    # --------------------------------------------------
+
+    if expenses > 0 and expense_categories:
+        largest_category = max(
+            expense_categories,
+            key=expense_categories.get
+        )
+
+        largest_expense = expense_categories[
+            largest_category
+        ]
+
+        expense_share = (
+            largest_expense
+            / expenses
+            * 100
+        )
+
+        if expense_share >= 50:
+            risks.append({
+                "severity": "medium",
+                "area": "Expenses",
+                "title": "Spending is concentrated",
+                "message": (
+                    f"{largest_category} accounts for "
+                    f"{expense_share:.1f}% of recorded expenses "
+                    f"(PKR {largest_expense:,.2f})."
+                ),
+                "action": (
+                    "Review this category for one-off entries, "
+                    "pricing changes, duplicate costs, or savings."
+                ),
+                "score": 55,
+            })
+
+    # --------------------------------------------------
+    # PRIORITY COLLECTION
+    # --------------------------------------------------
+
+    if overdue_items:
+        overdue_items.sort(
+            key=lambda item: (
+                item["days_overdue"],
+                item["outstanding"],
+            ),
+            reverse=True
+        )
+
+        top_overdue = overdue_items[0]
+
+        risks.append({
+            "severity": "action",
+            "area": "Next Action",
+            "title": "Collection action to take first",
+            "message": (
+                f"Invoice {top_overdue['invoice']} for "
+                f"{top_overdue['client']} has "
+                f"PKR {top_overdue['outstanding']:,.2f} "
+                f"outstanding and is "
+                f"{top_overdue['days_overdue']} day(s) overdue."
+            ),
+            "action": (
+                "Contact this customer first and request a "
+                "specific payment commitment."
+            ),
+            "score": 100,
+        })
+
+    elif total_outstanding > 0 and client_outstanding:
+        top_client = max(
+            client_outstanding,
+            key=client_outstanding.get
+        )
+
+        risks.append({
+            "severity": "action",
+            "area": "Next Action",
+            "title": "Largest collection opportunity",
+            "message": (
+                f"{top_client} currently has "
+                f"PKR {client_outstanding[top_client]:,.2f} "
+                f"outstanding."
+            ),
+            "action": (
+                "Review the open invoices for this customer and "
+                "schedule the appropriate collection follow-up."
+            ),
+            "score": 90,
+        })
+
+    # --------------------------------------------------
+    # SORT + SUMMARY
+    # --------------------------------------------------
+
+    risks.sort(
+        key=lambda item: item["score"],
+        reverse=True
+    )
+
+    critical_count = sum(
+        1
+        for item in risks
+        if item["severity"] == "critical"
+    )
+
+    high_count = sum(
+        1
+        for item in risks
+        if item["severity"] == "high"
+    )
+
+    if critical_count:
+        overall_status = "Critical"
+    elif high_count:
+        overall_status = "Needs Attention"
+    elif risks:
+        overall_status = "Monitor"
+    else:
+        overall_status = "Stable"
+
+    return {
+        "overall_status": overall_status,
+        "total_invoiced": total_invoiced,
+        "total_paid": total_paid,
+        "total_outstanding": total_outstanding,
+        "collection_rate": collection_rate,
+        "overdue_total": overdue_total,
+        "overdue_count": overdue_count,
+        "income": income,
+        "expenses": expenses,
+        "net_cash_flow": net_cash_flow,
+        "risks": risks,
+        "top_priorities": risks[:3],
+        "disclaimer": (
+            "Recommendations are based only on recorded finance "
+            "data and are decision support, not accounting, tax, "
+            "legal, or banking advice."
+        ),
     }

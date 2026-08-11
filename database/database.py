@@ -359,7 +359,80 @@ def get_category_rules():
             """)
             return cursor.fetchall()
 
+def transaction_exists(
+    transaction_date,
+    transaction_type,
+    description,
+    amount,
+    account,
+    reference=None
+):
+    """
+    Check whether a transaction has already been imported.
 
+    If a reference exists, it is the strongest duplicate signal.
+    Otherwise we compare the transaction's core fields.
+    """
+
+    description = str(description or "").strip()
+    account = str(account or "").strip()
+    reference = str(reference or "").strip()
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+
+            # ------------------------------------------
+            # BEST CASE: BANK REFERENCE EXISTS
+            # ------------------------------------------
+
+            if reference:
+                cursor.execute(
+                    """
+                    SELECT 1
+                    FROM transactions
+                    WHERE transaction_date = %s
+                    AND LOWER(COALESCE(account, '')) = LOWER(%s)
+                    AND LOWER(COALESCE(reference, '')) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (
+                        transaction_date,
+                        account,
+                        reference
+                    )
+                )
+
+                if cursor.fetchone():
+                    return True
+
+            # ------------------------------------------
+            # FALLBACK: MATCH CORE TRANSACTION DETAILS
+            # ------------------------------------------
+
+            cursor.execute(
+                """
+                SELECT 1
+                FROM transactions
+                WHERE transaction_date = %s
+                AND LOWER(transaction_type) = LOWER(%s)
+                AND LOWER(TRIM(COALESCE(description, '')))
+                    = LOWER(TRIM(%s))
+                AND ABS(amount - %s) < 0.01
+                AND LOWER(TRIM(COALESCE(account, '')))
+                    = LOWER(TRIM(%s))
+                LIMIT 1
+                """,
+                (
+                    transaction_date,
+                    transaction_type,
+                    description,
+                    float(amount),
+                    account
+                )
+            )
+
+            return cursor.fetchone() is not None
+        
 def add_transaction(
     transaction_date,
     transaction_type,
@@ -1369,3 +1442,397 @@ def get_monthly_transaction_details(year, month):
             )
 
             return cursor.fetchall()
+
+# --------------------------------------------------
+# AI ASSISTANT — VERIFIED FINANCIAL QUERY FUNCTIONS
+# --------------------------------------------------
+
+def get_financial_assistant_snapshot():
+    """
+    Return a verified business snapshot for the AI Assistant.
+
+    All monetary values are calculated by PostgreSQL/Python from stored
+    transactions, invoices and payment events. The language layer should
+    explain these values, never invent or recalculate them.
+    """
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    COALESCE(SUM(
+                        CASE
+                            WHEN LOWER(transaction_type) = 'income'
+                            THEN amount
+                            ELSE 0
+                        END
+                    ), 0),
+                    COALESCE(SUM(
+                        CASE
+                            WHEN LOWER(transaction_type) = 'expense'
+                            THEN amount
+                            ELSE 0
+                        END
+                    ), 0)
+                FROM transactions
+            """)
+            transaction_row = cursor.fetchone()
+
+            cursor.execute("""
+                SELECT
+                    COALESCE(SUM(i.amount), 0),
+                    COALESCE(SUM(payment_totals.total_paid), 0),
+                    COALESCE(SUM(
+                        GREATEST(
+                            COALESCE(i.amount, 0)
+                            - COALESCE(payment_totals.total_paid, 0),
+                            0
+                        )
+                    ), 0),
+                    COUNT(*) FILTER (
+                        WHERE LOWER(COALESCE(i.status, '')) = 'overdue'
+                        AND GREATEST(
+                            COALESCE(i.amount, 0)
+                            - COALESCE(payment_totals.total_paid, 0),
+                            0
+                        ) > 0
+                    )
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT
+                        invoice_number,
+                        COALESCE(SUM(amount_paid), 0) AS total_paid
+                    FROM payment_events
+                    GROUP BY invoice_number
+                ) payment_totals
+                    ON payment_totals.invoice_number = i.invoice_number
+            """)
+            invoice_row = cursor.fetchone()
+
+    income = float(transaction_row[0] or 0)
+    expenses = float(transaction_row[1] or 0)
+
+    return {
+        "income": income,
+        "expenses": expenses,
+        "net_cash_flow": income - expenses,
+        "total_invoiced": float(invoice_row[0] or 0),
+        "total_collected": float(invoice_row[1] or 0),
+        "total_outstanding": float(invoice_row[2] or 0),
+        "overdue_invoice_count": int(invoice_row[3] or 0),
+    }
+
+
+def get_spending_by_category(
+    category=None,
+    year=None,
+    month=None
+):
+    """
+    Return verified expense totals grouped by category.
+
+    Optional filters:
+    - category: exact category name, case-insensitive
+    - year: calendar year
+    - month: calendar month number (1-12)
+    """
+
+    conditions = [
+        "LOWER(transaction_type) = 'expense'"
+    ]
+    params = []
+
+    if category:
+        conditions.append(
+            "LOWER(COALESCE(category, 'Uncategorized')) = LOWER(%s)"
+        )
+        params.append(str(category).strip())
+
+    if year is not None:
+        conditions.append(
+            "EXTRACT(YEAR FROM transaction_date) = %s"
+        )
+        params.append(int(year))
+
+    if month is not None:
+        conditions.append(
+            "EXTRACT(MONTH FROM transaction_date) = %s"
+        )
+        params.append(int(month))
+
+    where_clause = " AND ".join(conditions)
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    COALESCE(category, 'Uncategorized') AS category,
+                    COALESCE(SUM(amount), 0) AS total,
+                    COUNT(*) AS transaction_count
+                FROM transactions
+                WHERE {where_clause}
+                GROUP BY COALESCE(category, 'Uncategorized')
+                ORDER BY total DESC
+                """,
+                tuple(params)
+            )
+
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "category": row[0],
+            "amount": float(row[1] or 0),
+            "transaction_count": int(row[2] or 0),
+        }
+        for row in rows
+    ]
+
+
+def get_top_expenses(
+    limit=5,
+    year=None,
+    month=None
+):
+    """
+    Return the largest verified expense transactions.
+    """
+
+    limit = max(1, min(int(limit), 50))
+
+    conditions = [
+        "LOWER(transaction_type) = 'expense'"
+    ]
+    params = []
+
+    if year is not None:
+        conditions.append(
+            "EXTRACT(YEAR FROM transaction_date) = %s"
+        )
+        params.append(int(year))
+
+    if month is not None:
+        conditions.append(
+            "EXTRACT(MONTH FROM transaction_date) = %s"
+        )
+        params.append(int(month))
+
+    where_clause = " AND ".join(conditions)
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT
+                    transaction_date,
+                    description,
+                    amount,
+                    COALESCE(category, 'Uncategorized'),
+                    COALESCE(account, 'Unknown')
+                FROM transactions
+                WHERE {where_clause}
+                ORDER BY amount DESC, transaction_date DESC, id DESC
+                LIMIT %s
+                """,
+                tuple(params + [limit])
+            )
+
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "date": row[0],
+            "description": row[1] or "No description",
+            "amount": float(row[2] or 0),
+            "category": row[3],
+            "account": row[4],
+        }
+        for row in rows
+    ]
+
+
+def get_outstanding_customers(limit=None):
+    """
+    Return customers ranked by verified outstanding invoice balance.
+    Payments are aggregated before joining to invoices to avoid
+    multiplying invoice amounts.
+    """
+
+    query = """
+        SELECT
+            i.client,
+            COALESCE(SUM(i.amount), 0) AS invoiced,
+            COALESCE(SUM(payment_totals.total_paid), 0) AS paid,
+            COALESCE(SUM(
+                GREATEST(
+                    COALESCE(i.amount, 0)
+                    - COALESCE(payment_totals.total_paid, 0),
+                    0
+                )
+            ), 0) AS outstanding,
+            COUNT(*) FILTER (
+                WHERE GREATEST(
+                    COALESCE(i.amount, 0)
+                    - COALESCE(payment_totals.total_paid, 0),
+                    0
+                ) > 0
+            ) AS open_invoice_count
+        FROM invoices i
+        LEFT JOIN (
+            SELECT
+                invoice_number,
+                COALESCE(SUM(amount_paid), 0) AS total_paid
+            FROM payment_events
+            GROUP BY invoice_number
+        ) payment_totals
+            ON payment_totals.invoice_number = i.invoice_number
+        GROUP BY i.client
+        HAVING COALESCE(SUM(
+            GREATEST(
+                COALESCE(i.amount, 0)
+                - COALESCE(payment_totals.total_paid, 0),
+                0
+            )
+        ), 0) > 0
+        ORDER BY outstanding DESC
+    """
+
+    params = ()
+
+    if limit is not None:
+        safe_limit = max(1, min(int(limit), 100))
+        query += " LIMIT %s"
+        params = (safe_limit,)
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+    return [
+        {
+            "client": row[0] or "Unknown",
+            "invoiced": float(row[1] or 0),
+            "paid": float(row[2] or 0),
+            "outstanding": float(row[3] or 0),
+            "open_invoice_count": int(row[4] or 0),
+        }
+        for row in rows
+    ]
+
+
+def get_collection_priorities(limit=5):
+    """
+    Return unpaid invoices ranked for collection attention.
+
+    Ranking is deterministic:
+    overdue invoices first, then earliest due date, then largest balance.
+    """
+
+    limit = max(1, min(int(limit), 50))
+
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    i.invoice_number,
+                    i.client,
+                    i.amount,
+                    i.status,
+                    i.due_date,
+                    COALESCE(payment_totals.total_paid, 0) AS total_paid,
+                    GREATEST(
+                        COALESCE(i.amount, 0)
+                        - COALESCE(payment_totals.total_paid, 0),
+                        0
+                    ) AS outstanding
+                FROM invoices i
+                LEFT JOIN (
+                    SELECT
+                        invoice_number,
+                        COALESCE(SUM(amount_paid), 0) AS total_paid
+                    FROM payment_events
+                    GROUP BY invoice_number
+                ) payment_totals
+                    ON payment_totals.invoice_number = i.invoice_number
+                WHERE GREATEST(
+                    COALESCE(i.amount, 0)
+                    - COALESCE(payment_totals.total_paid, 0),
+                    0
+                ) > 0
+                ORDER BY
+                    CASE
+                        WHEN LOWER(COALESCE(i.status, '')) = 'overdue'
+                        THEN 0
+                        ELSE 1
+                    END,
+                    NULLIF(i.due_date, '')::date ASC NULLS LAST,
+                    outstanding DESC
+                LIMIT %s
+                """,
+                (limit,)
+            )
+
+            rows = cursor.fetchall()
+
+    today = date.today()
+    results = []
+
+    for row in rows:
+        due_date = row[4]
+        parsed_due_date = None
+
+        if due_date:
+            if isinstance(due_date, date):
+                parsed_due_date = due_date
+            else:
+                try:
+                    parsed_due_date = date.fromisoformat(str(due_date))
+                except ValueError:
+                    parsed_due_date = None
+
+        days_overdue = 0
+
+        if parsed_due_date and parsed_due_date < today:
+            days_overdue = (today - parsed_due_date).days
+
+        results.append({
+            "invoice_number": row[0],
+            "client": row[1] or "Unknown",
+            "invoice_amount": float(row[2] or 0),
+            "status": row[3] or "Unknown",
+            "due_date": parsed_due_date,
+            "total_paid": float(row[5] or 0),
+            "outstanding": float(row[6] or 0),
+            "days_overdue": days_overdue,
+        })
+
+    return results
+
+
+def get_monthly_financial_snapshot(year, month):
+    """
+    Return a verified monthly snapshot used for questions such as:
+    'What was my net cash flow this month?'
+    """
+
+    pnl = get_monthly_profit_and_loss(
+        int(year),
+        int(month)
+    )
+
+    expenses = get_spending_by_category(
+        year=int(year),
+        month=int(month)
+    )
+
+    return {
+        "year": int(year),
+        "month": int(month),
+        "income": float(pnl["income"]),
+        "expenses": float(pnl["expenses"]),
+        "net_cash_flow": float(pnl["net_profit"]),
+        "expense_breakdown": expenses,
+    }

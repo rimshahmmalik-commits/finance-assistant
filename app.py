@@ -11,6 +11,9 @@ from views.analytics import show_analytics_page
 from views.transactions import show_transactions_page
 from views.reports import show_reports_page
 from views.forecast import show_forecast_page
+from views.transaction_import import show_transaction_import_page
+from views.ai_assistant import show_ai_assistant_page
+
 
 st.set_page_config(
     page_title="Finance Assistant",
@@ -37,6 +40,7 @@ page = st.sidebar.radio(
         "Clients",
         "Invoices",
         "Transactions",
+        "Smart Transaction Import",
         "Reports",
         "Cash Flow Forecast",
         "Reminder Center",
@@ -66,26 +70,23 @@ elif page == "Invoices":
 elif page == "Transactions":
     show_transactions_page()
 
+elif page == "Smart Transaction Import":
+    show_transaction_import_page()
+
 elif page == "Reports":
     show_reports_page()
-
 
 elif page == "Cash Flow Forecast":
     show_forecast_page()
 
-
 elif page == "Reminder Center":
     show_reminders_page()
-
 
 elif page == "Analytics":
     show_analytics_page()
 
-
 elif page == "AI Assistant":
-    st.title("AI Assistant")
-    st.info("Coming soon.")
-
+    show_ai_assistant_page()
 
 elif page == "Settings":
     st.title("Settings")
