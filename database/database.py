@@ -27,6 +27,7 @@ def create_tables():
     create_invoice_table()
     create_review_decisions_table()
     create_payment_events_table()
+    create_reminder_events_table()
 
     migrate_invoice_columns()
 
@@ -141,6 +142,25 @@ def create_payment_events_table():
             amount_paid REAL DEFAULT 0,
             note TEXT,
             recorded_at TEXT NOT NULL
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def create_reminder_events_table():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reminder_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_number TEXT NOT NULL,
+            reminder_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            note TEXT,
+            sent_at TEXT NOT NULL
         )
     """)
 
@@ -638,3 +658,216 @@ def get_total_paid_for_invoice(
     conn.close()
 
     return total_paid
+# --------------------------------------------------
+# PAYMENT REMINDERS
+# --------------------------------------------------
+
+def create_reminder_events_table():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reminder_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_number TEXT NOT NULL,
+            reminder_type TEXT NOT NULL,
+            message TEXT,
+            status TEXT NOT NULL,
+            recorded_at TEXT NOT NULL
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def get_reminder_queue():
+    """
+    Returns unpaid invoices that are overdue
+    or due within the next 7 days.
+    """
+
+    update_overdue_invoices()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    today = date.today()
+
+    cursor.execute("""
+        SELECT
+            i.invoice_number,
+            i.client,
+            i.amount,
+            i.status,
+            i.due_date,
+            c.email
+        FROM invoices i
+        LEFT JOIN clients c
+            ON LOWER(i.client) = LOWER(c.company)
+        WHERE i.status NOT IN (
+            'Paid',
+            'Rejected',
+            'Hold'
+        )
+        AND i.due_date IS NOT NULL
+        AND i.due_date != ''
+        ORDER BY i.due_date ASC
+    """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    queue = []
+
+    for row in rows:
+
+        invoice_number = row[0]
+        client = row[1]
+        amount = row[2]
+        status = row[3]
+        due_date_text = row[4]
+        email = row[5]
+
+        try:
+            due = datetime.strptime(
+                due_date_text,
+                "%Y-%m-%d"
+            ).date()
+
+        except (ValueError, TypeError):
+            continue
+
+        days_until_due = (
+            due - today
+        ).days
+
+        total_paid = (
+            get_total_paid_for_invoice(
+                invoice_number
+            )
+        )
+
+        remaining = max(
+            amount - total_paid,
+            0
+        )
+
+        if remaining <= 0:
+            continue
+
+        if days_until_due < 0:
+
+            reminder_type = "Overdue"
+
+        elif days_until_due == 0:
+
+            reminder_type = "Due Today"
+
+        elif days_until_due <= 7:
+
+            reminder_type = "Due Soon"
+
+        else:
+            continue
+
+        queue.append({
+            "invoice_number": invoice_number,
+            "client": client,
+            "email": email or "",
+            "amount": amount,
+            "paid": total_paid,
+            "remaining": remaining,
+            "status": status,
+            "due_date": due_date_text,
+            "days_until_due": days_until_due,
+            "reminder_type": reminder_type
+        })
+
+    return queue
+
+
+def add_reminder_event(
+    invoice_number,
+    reminder_type,
+    message,
+    status="Prepared"
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    recorded_at = datetime.now().isoformat(
+        timespec="seconds"
+    )
+
+    cursor.execute(
+        """
+        INSERT INTO reminder_events(
+            invoice_number,
+            reminder_type,
+            message,
+            status,
+            recorded_at
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            invoice_number,
+            reminder_type,
+            message,
+            status,
+            recorded_at
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_reminder_events():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT
+            invoice_number,
+            reminder_type,
+            message,
+            status,
+            recorded_at
+        FROM reminder_events
+        ORDER BY id DESC
+    """)
+
+    events = cursor.fetchall()
+
+    conn.close()
+
+    return events
+def update_client(
+    client_id,
+    company,
+    email,
+    phone
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        UPDATE clients
+        SET company = ?,
+            email = ?,
+            phone = ?
+        WHERE id = ?
+        """,
+        (
+            company,
+            email,
+            phone,
+            client_id
+        )
+    )
+
+    conn.commit()
+    conn.close()

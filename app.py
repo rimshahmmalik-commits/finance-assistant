@@ -1,4 +1,5 @@
 import streamlit as st
+from views.reminders import show_reminders_page
 
 from database.database import (
     create_tables,
@@ -30,6 +31,7 @@ page = st.sidebar.radio(
         "Smart Import",
         "Clients",
         "Invoices",
+        "Reminder Center",
         "Analytics",
         "AI Assistant",
         "Settings"
@@ -60,3 +62,6 @@ elif page == "AI Assistant":
 elif page == "Settings":
     st.title("Settings")
     st.info("Coming soon.")
+
+elif page == "Reminder Center":
+    show_reminders_page()

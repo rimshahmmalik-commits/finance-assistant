@@ -431,7 +431,7 @@ def show_invoices_page():
     # INVOICE CARDS
     # --------------------------------------------------
 
-    for invoice in filtered_invoices:
+    for invoice_index, invoice in enumerate(filtered_invoices):
 
         invoice_number = invoice[0]
         client = invoice[1]
@@ -498,19 +498,19 @@ def show_invoices_page():
                 edited_invoice_date = st.date_input(
                     "Invoice Date",
                     value=current_invoice_date,
-                    key=f"invoice_date_{invoice_number}"
+                    key=f"invoice_date_{invoice_index}_{invoice_number}"
                 )
 
             with date2:
                 edited_due_date = st.date_input(
                     "Due Date",
                     value=current_due_date,
-                    key=f"due_date_{invoice_number}"
+                    key=f"due_date_{invoice_index}_{invoice_number}"
                 )
 
             if st.button(
                 "Update Dates",
-                key=f"dates_{invoice_number}"
+                key=f"dates_{invoice_index}_{invoice_number}"
             ):
 
                 if edited_due_date < edited_invoice_date:
@@ -602,12 +602,12 @@ def show_invoices_page():
                 "Change Status",
                 status_options,
                 index=current_index,
-                key=f"status_{invoice_number}"
+                key=f"status_{invoice_index}_{invoice_number}"
             )
 
             if st.button(
                 "Update Status",
-                key=f"update_{invoice_number}"
+                key=f"update_{invoice_index}_{invoice_number}"
             ):
 
                 update_invoice_status(
@@ -674,7 +674,7 @@ def show_invoices_page():
             if remaining_balance > 0:
 
                 with st.form(
-                    f"payment_form_{invoice_number}"
+                    f"payment_form_{invoice_index}_{invoice_number}"
                 ):
 
                     payment_amount = st.number_input(
@@ -684,13 +684,13 @@ def show_invoices_page():
                             remaining_balance
                         ),
                         step=100.0,
-                        key=f"payment_amount_{invoice_number}"
+                        key=f"payment_amount_{invoice_index}_{invoice_number}"
                     )
 
                     payment_note = st.text_input(
                         "Payment Note",
                         placeholder="e.g. Bank transfer",
-                        key=f"payment_note_{invoice_number}"
+                        key=f"payment_note_{invoice_index}_{invoice_number}"
                     )
 
                     payment_submitted = (
@@ -805,5 +805,5 @@ def show_invoices_page():
                 data=pdf,
                 file_name=f"{invoice_number}.pdf",
                 mime="application/pdf",
-                key=f"pdf_{invoice_number}"
+                key=f"pdf_{invoice_index}_{invoice_number}"
             )
