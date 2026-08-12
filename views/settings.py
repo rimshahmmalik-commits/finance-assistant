@@ -1,3 +1,8 @@
+import csv
+import io
+import zipfile
+from datetime import datetime
+
 import streamlit as st
 
 from database.database import (
@@ -10,6 +15,10 @@ from database.database import (
     update_business_category,
     delete_business_category,
     reset_business_categories_to_industry_defaults,
+    get_export_clients,
+    get_export_invoices,
+    get_export_transactions,
+    get_export_payments,
 )
 
 
@@ -33,6 +42,32 @@ TIMEZONES = [
 ]
 
 
+REPORT_FREQUENCIES = ["Daily", "Weekly", "Monthly"]
+REPORT_DELIVERY_OPTIONS = ["In-app", "Email", "WhatsApp"]
+
+
+def rows_to_csv(headers, rows):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
+def build_complete_export():
+    datasets = {
+        "clients.csv": (["id", "company", "email", "phone"], get_export_clients()),
+        "invoices.csv": (["id", "invoice_number", "client", "amount", "status", "invoice_date", "due_date"], get_export_invoices()),
+        "transactions.csv": (["id", "transaction_date", "transaction_type", "description", "amount", "category", "account", "reference", "source", "created_at"], get_export_transactions()),
+        "payments.csv": (["id", "invoice_number", "payment_status", "amount_paid", "note", "recorded_at"], get_export_payments()),
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for filename, (headers, rows) in datasets.items():
+            archive.writestr(filename, rows_to_csv(headers, rows))
+    return buffer.getvalue()
+
+
 def show_settings_page():
     st.title("Settings")
 
@@ -52,12 +87,14 @@ def show_settings_page():
         tab_finance,
         tab_categories,
         tab_reminders,
+        tab_data,
     ) = st.tabs(
         [
             "Business Profile",
             "Finance Defaults",
             "Categories",
-            "Reminders",
+            "Reminders & Reports",
+            "Data & Export",
         ]
     )
 
@@ -413,8 +450,23 @@ def show_settings_page():
                 value=settings["overdue_reminders_enabled"]
             )
 
+            st.divider()
+            report_frequency = st.selectbox(
+                "Summary Frequency",
+                REPORT_FREQUENCIES,
+                index=REPORT_FREQUENCIES.index(settings.get("report_frequency", "Weekly"))
+                if settings.get("report_frequency", "Weekly") in REPORT_FREQUENCIES else 1
+            )
+            report_delivery = st.selectbox(
+                "Delivery Preference",
+                REPORT_DELIVERY_OPTIONS,
+                index=REPORT_DELIVERY_OPTIONS.index(settings.get("report_delivery", "In-app"))
+                if settings.get("report_delivery", "In-app") in REPORT_DELIVERY_OPTIONS else 0
+            )
+            st.caption("Email/WhatsApp delivery is saved as a preference; automated sending will be connected later.")
+
             reminder_saved = st.form_submit_button(
-                "Save Reminder Preferences",
+                "Save Reminder & Report Preferences",
                 type="primary",
                 use_container_width=True
             )
@@ -434,7 +486,47 @@ def show_settings_page():
                     reminders_enabled,
                     reminder_days_before,
                     overdue_reminders_enabled,
+                    report_frequency,
+                    report_delivery,
                 )
 
-                st.success("Reminder preferences saved.")
+                st.success("Reminder and report preferences saved.")
                 st.rerun()
+
+    # --------------------------------------------------
+    # DATA & EXPORT
+    # --------------------------------------------------
+    with tab_data:
+        st.subheader("Data & Export")
+        st.caption("Download your finance records at any time. Your business data should never feel locked into the app.")
+
+        clients = get_export_clients()
+        invoices = get_export_invoices()
+        transactions = get_export_transactions()
+        payments = get_export_payments()
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Clients", len(clients))
+        c2.metric("Invoices", len(invoices))
+        c3.metric("Transactions", len(transactions))
+        c4.metric("Payments", len(payments))
+
+        st.divider()
+        left, right = st.columns(2)
+        with left:
+            st.download_button("Download Clients CSV", rows_to_csv(["id","company","email","phone"], clients), "finance_assistant_clients.csv", "text/csv", use_container_width=True)
+            st.download_button("Download Transactions CSV", rows_to_csv(["id","transaction_date","transaction_type","description","amount","category","account","reference","source","created_at"], transactions), "finance_assistant_transactions.csv", "text/csv", use_container_width=True)
+        with right:
+            st.download_button("Download Invoices CSV", rows_to_csv(["id","invoice_number","client","amount","status","invoice_date","due_date"], invoices), "finance_assistant_invoices.csv", "text/csv", use_container_width=True)
+            st.download_button("Download Payments CSV", rows_to_csv(["id","invoice_number","payment_status","amount_paid","note","recorded_at"], payments), "finance_assistant_payments.csv", "text/csv", use_container_width=True)
+
+        st.divider()
+        export_date = datetime.now().strftime("%Y-%m-%d")
+        st.download_button(
+            "Download Complete Finance Export (.zip)",
+            build_complete_export(),
+            f"finance_assistant_export_{export_date}.zip",
+            "application/zip",
+            type="primary",
+            use_container_width=True,
+        )

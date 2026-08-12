@@ -736,6 +736,8 @@ def create_business_settings_table():
                     reminders_enabled BOOLEAN DEFAULT TRUE,
                     reminder_days_before INTEGER DEFAULT 3,
                     overdue_reminders_enabled BOOLEAN DEFAULT TRUE,
+                    report_frequency TEXT DEFAULT 'Weekly',
+                    report_delivery TEXT DEFAULT 'In-app',
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -778,6 +780,14 @@ def create_business_settings_table():
             cursor.execute("""
                 ALTER TABLE business_settings
                 ADD COLUMN IF NOT EXISTS overdue_reminders_enabled BOOLEAN DEFAULT TRUE
+            """)
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS report_frequency TEXT DEFAULT 'Weekly'
+            """)
+            cursor.execute("""
+                ALTER TABLE business_settings
+                ADD COLUMN IF NOT EXISTS report_delivery TEXT DEFAULT 'In-app'
             """)
 
             cursor.execute("""
@@ -854,7 +864,9 @@ def get_business_settings():
                     tax_rate,
                     reminders_enabled,
                     reminder_days_before,
-                    overdue_reminders_enabled
+                    overdue_reminders_enabled,
+                    report_frequency,
+                    report_delivery
                 FROM business_settings
                 WHERE id = 1
                 LIMIT 1
@@ -877,6 +889,8 @@ def get_business_settings():
             "reminders_enabled": True,
             "reminder_days_before": 3,
             "overdue_reminders_enabled": True,
+            "report_frequency": "Weekly",
+            "report_delivery": "In-app",
         }
 
     return {
@@ -899,6 +913,8 @@ def get_business_settings():
         "overdue_reminders_enabled": bool(
             True if row[12] is None else row[12]
         ),
+        "report_frequency": row[13] or "Weekly",
+        "report_delivery": row[14] or "In-app",
     }
 
 
@@ -915,7 +931,9 @@ def save_business_settings(
     tax_rate,
     reminders_enabled,
     reminder_days_before,
-    overdue_reminders_enabled
+    overdue_reminders_enabled,
+    report_frequency=None,
+    report_delivery=None
 ):
     business_name = str(business_name or "").strip()
     business_type = str(business_type or "Other").strip() or "Other"
@@ -929,6 +947,11 @@ def save_business_settings(
     payment_terms = max(0, int(payment_terms))
     tax_rate = max(0.0, float(tax_rate))
     reminder_days_before = max(0, int(reminder_days_before))
+
+    if report_frequency is None or report_delivery is None:
+        current = get_business_settings()
+        report_frequency = report_frequency or current.get("report_frequency", "Weekly")
+        report_delivery = report_delivery or current.get("report_delivery", "In-app")
 
     with get_connection() as conn:
         with conn.cursor() as cursor:
@@ -949,11 +972,14 @@ def save_business_settings(
                     reminders_enabled,
                     reminder_days_before,
                     overdue_reminders_enabled,
+                    report_frequency,
+                    report_delivery,
                     updated_at
                 )
                 VALUES (
                     1, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
+                    %s, %s,
                     CURRENT_TIMESTAMP
                 )
                 ON CONFLICT (id)
@@ -971,6 +997,8 @@ def save_business_settings(
                     reminders_enabled = EXCLUDED.reminders_enabled,
                     reminder_days_before = EXCLUDED.reminder_days_before,
                     overdue_reminders_enabled = EXCLUDED.overdue_reminders_enabled,
+                    report_frequency = EXCLUDED.report_frequency,
+                    report_delivery = EXCLUDED.report_delivery,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -987,6 +1015,8 @@ def save_business_settings(
                     bool(reminders_enabled),
                     reminder_days_before,
                     bool(overdue_reminders_enabled),
+                    report_frequency,
+                    report_delivery,
                 )
             )
 
@@ -1152,6 +1182,34 @@ def reset_business_categories_to_industry_defaults():
 
     ensure_business_categories(business_type)
 
+
+
+# --------------------------------------------------
+# DATA EXPORT
+# --------------------------------------------------
+def get_export_clients():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, company, email, phone FROM clients ORDER BY company")
+            return cursor.fetchall()
+
+def get_export_invoices():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, invoice_number, client, amount, status, invoice_date, due_date FROM invoices ORDER BY id DESC")
+            return cursor.fetchall()
+
+def get_export_transactions():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, transaction_date, transaction_type, description, amount, category, account, reference, source, created_at FROM transactions ORDER BY transaction_date DESC, id DESC")
+            return cursor.fetchall()
+
+def get_export_payments():
+    with get_connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, invoice_number, payment_status, amount_paid, note, recorded_at FROM payment_events ORDER BY id DESC")
+            return cursor.fetchall()
 
 # --------------------------------------------------
 # CLIENTS
