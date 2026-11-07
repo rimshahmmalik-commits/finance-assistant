@@ -6,15 +6,16 @@ from database.database import (
     add_invoice,
     add_payment_event,
     add_transaction,
+    create_tables,
 )
 
 
 DEMO_CLIENTS = [
-    ("Atlas Traders", "accounts@atlastraders.pk", "+92 300 1112233"),
-    ("Nexa Retail", "finance@nexaretail.pk", "+92 301 2223344"),
-    ("Urban Mart", "payments@urbanmart.pk", "+92 302 3334455"),
-    ("PakCraft Supplies", "accounts@pakcraft.pk", "+92 303 4445566"),
-    ("Vertex Distribution", "finance@vertexdist.pk", "+92 304 5556677"),
+    ("Atlas Traders", "atlas@example.com", ""),
+    ("Nexa Retail", "nexa@example.com", ""),
+    ("Urban Mart", "urban@example.com", ""),
+    ("PakCraft Supplies", "pakcraft@example.com", ""),
+    ("Vertex Distribution", "vertex@example.com", ""),
 ]
 
 
@@ -214,6 +215,8 @@ def seed_transactions(today):
 
 
 def seed_demo_data():
+    # Allow the documented demo command to run against a fresh database.
+    create_tables()
     today = date.today()
 
     print("Clearing previous demo-only records...")

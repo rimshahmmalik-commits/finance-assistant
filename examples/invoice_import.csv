@@ -1,0 +1,6 @@
+invoice_number,client,amount
+SAMPLE-001,Example Retail,12000
+SAMPLE-002,Example Supplies,8500
+SAMPLE-002,Example Supplies,8500
+SAMPLE-003,,6400
+SAMPLE-004,Example Studio,-500

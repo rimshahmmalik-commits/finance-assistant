@@ -1,0 +1,14 @@
+# Compatible version ranges; see docs/VERIFICATION.md for validation limits.
+streamlit>=1.49,<2
+pandas>=2.2,<3
+psycopg[binary]>=3.2,<4
+psycopg-pool>=3.2,<4
+python-dotenv>=1.0,<2
+reportlab>=4.2,<5
+openpyxl>=3.1,<4
+xlrd>=2.0,<3
+requests>=2.32,<3
+msal>=1.30,<2
+google-auth>=2.35,<3
+google-auth-oauthlib>=1.2,<2
+google-api-python-client>=2.150,<3

@@ -4,3 +4,19 @@ invoice_ai.db
 .env
 gmail_credentials.json
 gmail_token.json
+
+# Local environments and credentials
+.venv/
+venv/
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*credentials*.json
+*token*.json
+
+# Local data and tooling
+*.db
+*.sqlite
+*.sqlite3
+.pytest_cache/
+.DS_Store
