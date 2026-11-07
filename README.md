@@ -7,6 +7,40 @@ The application combines a PostgreSQL data layer with spreadsheet imports,
 invoice review rules, PDF invoice generation and collection analytics. It is a
 development prototype, not a production accounting system.
 
+## Demo screenshots
+
+Captured from the running app on 8 November 2026 using a disposable PostgreSQL
+database and synthetic records. Amounts are in PKR.
+
+![Dashboard with invoice summaries and cash activity](docs/screenshots/dashboard.png)
+
+<details>
+<summary>View invoices, transactions, analytics and import validation</summary>
+
+### Invoice management
+
+![Invoice balances and payment status](docs/screenshots/invoices.png)
+
+### Transaction history
+
+![Income, expenses and transaction records](docs/screenshots/transactions.png)
+
+### Collection analytics
+
+![Rule-based collection insights and priorities](docs/screenshots/analytics.png)
+
+### Spreadsheet validation
+
+The sample CSV produces two ready rows and three blocked rows: a duplicate
+invoice, a missing client and a negative amount.
+
+![Smart Import review queue using the sample CSV](docs/screenshots/smart-import.png)
+
+</details>
+
+The local demo walkthrough, payment calculations, PDF generation and data exports
+were checked. See [verification notes](docs/VERIFICATION.md) for scope and limits.
+
 ## What is implemented
 
 | Area | Capabilities in the current interface |
@@ -140,8 +174,9 @@ examples/               Synthetic invoice-import example
   integration testing in the target environment.
 - No bank connection, payment gateway, OCR/PDF invoice extraction or production
   LLM integration is claimed.
-- A fresh database-to-interface walkthrough and email integration test should be
-  performed before any deployment. See [verification notes](docs/VERIFICATION.md).
+- Local database and interface checks passed with synthetic data. Production
+  deployment and email integrations still need testing in their target environment.
+  See [verification notes](docs/VERIFICATION.md).
 
 ## Portfolio summary
 
