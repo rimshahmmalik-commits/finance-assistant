@@ -4,6 +4,12 @@
 
 Completed checks:
 
+- Installed `requirements.txt` in a fresh Python 3.12 virtual environment;
+  `pip check` reported no broken requirements. All direct dependency imports
+  succeeded, including the Gmail and Microsoft helper dependencies.
+  Resolved versions included Streamlit 1.67.0, Pandas 2.3.3 and Psycopg 3.3.8.
+- Parsed the synthetic CSV and confirmed its five-row structure and deliberate
+  duplicate invoice example.
 - Parsed all 21 Python source files and checked imports between local modules.
 - Exercised invoice-review rules for duplicate invoices and missing clients,
   checking the resulting risk levels and review recommendations.
