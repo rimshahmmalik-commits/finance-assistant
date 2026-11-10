@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from demo.runtime import enabled as public_demo
 
 import pandas as pd
 import streamlit as st
@@ -318,7 +319,11 @@ def show_dashboard_page():
             st.rerun()
 
     with qa4:
-        if st.button("✦ Ask AI Advisor", use_container_width=True):
+        if public_demo():
+            if st.button("⌁ Open Analytics", use_container_width=True):
+                st.session_state.current_page = "Analytics"
+                st.rerun()
+        elif st.button("✦ Ask AI Advisor", use_container_width=True):
             st.session_state.current_page = "AI Assistant"
             st.rerun()
 

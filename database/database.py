@@ -1,5 +1,8 @@
 import os
 from datetime import datetime, date
+from contextlib import contextmanager
+from psycopg import sql
+from demo.runtime import enabled as public_demo, SCHEMA
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -10,7 +13,8 @@ from dotenv import load_dotenv
 # ENVIRONMENT / CONNECTION
 # --------------------------------------------------
 
-load_dotenv()
+if not public_demo():
+    load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -32,21 +36,31 @@ POOL = ConnectionPool(
 )
 
 
+@contextmanager
 def get_connection():
-    return POOL.connection()
+    with POOL.connection() as conn:
+        if public_demo():
+            name=SCHEMA.get()
+            if not name:raise RuntimeError('Demo database access requires a visitor session.')
+            conn.execute(sql.SQL('SET search_path TO {}').format(sql.Identifier(name)))
+        try:yield conn
+        finally:
+            if public_demo():conn.execute('RESET search_path')
 
 
 # --------------------------------------------------
 # INITIAL SETUP
 # --------------------------------------------------
 
-_TABLES_READY = False
+_TABLES_READY = set()
 
 
 def create_tables():
     global _TABLES_READY
 
-    if _TABLES_READY:
+    key=SCHEMA.get() if public_demo() else 'local'
+    if public_demo() and not key:raise RuntimeError('Missing visitor session.')
+    if key in _TABLES_READY:
         return
 
     create_clients_table()
@@ -59,7 +73,7 @@ def create_tables():
     create_business_settings_table()
     create_business_categories_table()
 
-    _TABLES_READY = True
+    _TABLES_READY.add(key)
 
 
 def create_clients_table():

@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 from database.database import (
     get_reminder_queue,
@@ -265,6 +266,8 @@ def show_reminders_page():
 
                     if st.button(
                         "Send Email",
+                        disabled=os.getenv("DEMO_PUBLIC")=="1",
+                        help="Sending is disabled in the public demo. Prepare and inspect the reminder instead.",
                         type="primary",
                         key=(
                             f"send_"

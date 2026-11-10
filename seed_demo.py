@@ -73,10 +73,11 @@ def clear_demo_data():
 
 
 def seed_clients():
+    from demo.runtime import enabled as public_demo
     for company, email, phone in DEMO_CLIENTS:
         add_client(
             company,
-            email,
+            email.replace("@example.com","@example.invalid") if public_demo() else email,
             phone
         )
 

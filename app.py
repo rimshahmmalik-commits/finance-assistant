@@ -1,4 +1,6 @@
 import streamlit as st
+import os
+from demo.runtime import enabled as public_demo,configure_session
 
 from utils.theme import apply_midnight_pro_theme
 
@@ -30,7 +32,10 @@ def initialize_database():
     return True
 
 
-initialize_database()
+if public_demo():
+    configure_session(st)
+else:
+    initialize_database()
 
 
 # --------------------------------------------------
@@ -83,7 +88,8 @@ with st.sidebar:
     nav_button("Reminders", "Reminder Center", "◷")
 
     st.caption("INTELLIGENCE")
-    nav_button("AI Advisor", "AI Assistant", "✦")
+    if not public_demo():
+        nav_button("AI Advisor", "AI Assistant", "✦")
     nav_button("Analytics", "Analytics", "⌁")
 
     st.divider()

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: finance-assistant-demo
+    runtime: docker
+    plan: free
+    branch: live-demo
+    dockerfilePath: ./Dockerfile.demo
+    envVars:
+      - key: DEMO_PUBLIC
+        value: "1"

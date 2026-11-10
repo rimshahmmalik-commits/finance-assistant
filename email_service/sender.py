@@ -21,6 +21,7 @@ GMAIL_SCOPES = [
 
 
 def get_gmail_service():
+    if os.getenv("DEMO_PUBLIC")=="1":raise RuntimeError("Email sending is disabled in the public demo.")
     credentials = None
 
     token_file = "gmail_token.json"
@@ -82,6 +83,7 @@ def send_gmail(
     subject,
     body
 ):
+    if os.getenv("DEMO_PUBLIC")=="1":raise RuntimeError("Email sending is disabled in the public demo.")
     service = get_gmail_service()
 
     message = EmailMessage()
@@ -118,6 +120,7 @@ def send_gmail(
 # ==================================================
 
 def get_microsoft_access_token():
+    if os.getenv("DEMO_PUBLIC")=="1":raise RuntimeError("Email sending is disabled in the public demo.")
     client_id = os.getenv(
         "MICROSOFT_CLIENT_ID"
     )
@@ -196,6 +199,7 @@ def send_microsoft_email(
     subject,
     body
 ):
+    if os.getenv("DEMO_PUBLIC")=="1":raise RuntimeError("Email sending is disabled in the public demo.")
     token = get_microsoft_access_token()
 
     endpoint = (

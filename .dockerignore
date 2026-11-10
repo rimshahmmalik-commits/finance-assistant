@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.sqlite*
+*credentials*.json
+*token*.json
